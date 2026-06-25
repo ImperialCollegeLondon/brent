@@ -1,11 +1,11 @@
 name: brent
 channels:
-  - defaults
   - conda-forge
 dependencies:
   - python=3.11
-  - conda-forge::orekit=12.0
-  - conda-forge::skyfield
+  - openjdk=8
+  - orekit=12.0
+  - skyfield
   - matplotlib
   - numpy
   - pandas
