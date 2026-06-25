@@ -35,9 +35,6 @@ from .parameters import NumericalPropagatorParameters
 from brent import Constants
 from brent.propagators import WrappedPropagator
 
-# Default parameters
-DEFAULT_INTEGRATOR = DormandPrince853IntegratorBuilder(0.1, 300.0, 1e-8)
-
 
 class OrekitNumericalPropagator(WrappedPropagator):
 
@@ -83,7 +80,7 @@ class OrekitNumericalPropagator(WrappedPropagator):
         # Create propagator builder
         propagatorBuilder = NumericalPropagatorBuilder(
             CartesianOrbit(state, Constants.DEFAULT_ECI, Constants.DEFAULT_MU),
-            DEFAULT_INTEGRATOR,
+            DormandPrince853IntegratorBuilder(0.1, 300.0, model.tol),
             PositionAngleType.MEAN,
             1.0,
         )

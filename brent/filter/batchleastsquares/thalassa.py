@@ -169,6 +169,7 @@ class ThalassaBatchLeastSquares(BatchLeastSquares):
             absolute_sigma=True,
             method="lm",
             full_output=True,
+            epsfcn=1e-8,
         )
 
         # Store optimisation scaling and results

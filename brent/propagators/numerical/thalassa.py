@@ -70,7 +70,7 @@ class ThalassaProcess(mp.Process):
         # Get THALASSA settings
         model = self.getModel(self.parameters)
         paths = self.getPaths()
-        settings = self.getSettings()
+        settings = self.getSettings(self.parameters)
         spacecraft = self.getSpacecraft(self.parameters)
 
         # Change working directory
@@ -176,12 +176,15 @@ class ThalassaProcess(mp.Process):
         return paths
 
     @classmethod
-    def getSettings(cls) -> pythalassa.Settings:
+    def getSettings(
+        cls,
+        parameters: NumericalPropagatorParameters,
+    ) -> pythalassa.Settings:
         # Declare settings
         # TODO: set
         settings = pythalassa.Settings()
         settings.eqs = pythalassa.EDROMO_C  # TODO: add options for different methods?
-        settings.tol = 1e-12  # TODO: add option to change tolerance?
+        settings.tol = parameters.tol
 
         # Return settings
         return settings

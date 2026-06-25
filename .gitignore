@@ -1,5 +1,11 @@
 # MacOS folder files
 .DS_Store
+# Results
+*.pkl
+*.bak
+*.csv
+*.pdf
+*.png
 
 # IDE
 .vscode

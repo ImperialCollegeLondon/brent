@@ -28,4 +28,5 @@ class NumericalPropagatorParameters:
     cd: float
     area_drag: float
 
-    # TODO: add tolerance
+    # Tolerance
+    tol: float = 1e-12
