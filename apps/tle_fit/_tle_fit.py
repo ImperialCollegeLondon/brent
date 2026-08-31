@@ -610,10 +610,10 @@ def main(input_path: str, output_dir: str) -> None:
 
     cfg = load_config(input_path)
 
+    saver = Saver(output_dir)
     ref_epoch = cfg.get("reference", {}).get("_epoch")
     result = fit_object(cfg["tle"], cfg, ref_epoch=ref_epoch, verbose=True)
 
-    saver = Saver(output_dir)
     saver.save_input(input_path)
     saver.update(result)
     saver.save(final=True)
