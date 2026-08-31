@@ -343,6 +343,25 @@ def find_ref_index(dates: list, ref_epoch) -> int:
     return int(np.argmin(diffs))
 
 
+def save_text_report(result: dict, path: str) -> None:
+    """Save all single-object fit results in a readable text format."""
+    with open(path, "w") as fid:
+        for key, value in result.items():
+            fid.write(f"{key}:\n")
+            if isinstance(value, np.ndarray):
+                fid.write(np.array2string(
+                    value,
+                    precision=12,
+                    max_line_width=120,
+                    threshold=value.size,
+                ))
+            elif key == "dates":
+                fid.write("\n".join(str(date) for date in value))
+            else:
+                fid.write(str(value))
+            fid.write("\n\n")
+
+
 # ---------------------------------------------------------------------------
 # Config loader
 # ---------------------------------------------------------------------------
@@ -617,5 +636,6 @@ def main(input_path: str, output_dir: str) -> None:
     saver.save_input(input_path)
     saver.update(result)
     saver.save(final=True)
+    save_text_report(result, f"{saver.directory}/{saver.name}_report.txt")
 
     print(f"Results saved to {saver.directory}")
