@@ -498,6 +498,7 @@ def fit_object(
     )
 
     ls_kwargs = {
+        "jac":      ls_cfg.get("jac", "3-point"),
         "method":   ls_cfg.get("method",   "lm"),
         "ftol":     ls_cfg.get("ftol",     1e-8),
         "xtol":     ls_cfg.get("xtol",     1e-8),
