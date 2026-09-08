@@ -12,3 +12,4 @@ from .antex import Antex
 from .sem_download import SEMDownload
 from .sem_merge import SEMMerge
 from .tle_fit import TLEFit
+from .tle_residuals import TLEResiduals
