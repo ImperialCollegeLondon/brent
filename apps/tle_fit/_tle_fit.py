@@ -1,7 +1,9 @@
 # Standard imports
+from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
 from datetime import datetime, timedelta
 import json
+import multiprocessing as mp
 import time
 
 # Third-party imports
@@ -284,6 +286,54 @@ def propagate_from_reference(t0: datetime,
 # Whitened residual function (§3 eq. whitened_residual)
 # ---------------------------------------------------------------------------
 
+class _ResidualFunction:
+    """Picklable residual callable for serial or process-parallel Jacobians."""
+
+    def __init__(self,
+                 t0: datetime,
+                 Y: np.ndarray,
+                 dates: list[datetime],
+                 model_cfg: dict,
+                 sigma6: np.ndarray,
+                 pscale: np.ndarray,
+                 rtn_matrices: np.ndarray):
+        self.t0 = t0
+        self.Y = Y
+        self.dates = dates
+        self.model_cfg = model_cfg
+        self.sigma6 = sigma6
+        self.pscale = pscale
+        self.rtn_matrices = rtn_matrices
+
+    def __call__(self, p_s: np.ndarray) -> np.ndarray:
+        # Un-scale the parameter vector to physical units
+        p = p_s * self.pscale
+        state0 = p[0:6]   # [m, m/s]
+        beta   = p[6]     # [m²/kg]
+
+        # Build Thalassa model with this β
+        model = _make_thalassa_model(self.model_cfg, beta)
+
+        # Propagate from t0 to all measurement epochs
+        X = propagate_from_reference(
+            self.t0,
+            state0,
+            model,
+            self.dates,
+        )   # (N, 6)
+
+        # Measurement residual ε_i = Y_i - X_i  (GCRF)
+        eps = self.Y - X   # (N, 6)
+
+        # Rotate ε to RIC frame: z_i = T_i @ ε_i  (eq. 444)
+        z_ric = np.einsum("nij,nj->ni", self.rtn_matrices, eps)   # (N, 6)
+
+        # Whiten: divide by RIC std-devs  (eq. whitened_residual)
+        z = z_ric / self.sigma6[np.newaxis, :]   # (N, 6), dimensionless
+
+        return z.ravel()
+
+
 def build_residual_fn(t0: datetime,
                       Y: np.ndarray,
                       dates: list[datetime],
@@ -291,7 +341,7 @@ def build_residual_fn(t0: datetime,
                       sigma6: np.ndarray,
                       pscale: np.ndarray,
                       rtn_matrices: np.ndarray):
-    """Return a closure `residuals(p_s)` for scipy.optimize.least_squares.
+    """Return a picklable residual callable for scipy.optimize.least_squares.
 
     The whitened residual is:
         z_i = T_i @ ε_i / σ   (component-wise division by σ)
@@ -306,30 +356,15 @@ def build_residual_fn(t0: datetime,
     pscale : (7,) array [lu,lu,lu,vu,vu,vu,β_scale] — converts scaled → physical params
     rtn_matrices : (N, 6, 6) inertial→RIC rotation matrices, one per measurement epoch
     """
-    def residuals(p_s: np.ndarray) -> np.ndarray:
-        # Un-scale the parameter vector to physical units
-        p = p_s * pscale
-        state0 = p[0:6]   # [m, m/s]
-        beta   = p[6]     # [m²/kg]
-
-        # Build Thalassa model with this β
-        model = _make_thalassa_model(model_cfg, beta)
-
-        # Propagate from t0 to all measurement epochs
-        X = propagate_from_reference(t0, state0, model, dates)   # (N, 6)
-
-        # Measurement residual ε_i = Y_i - X_i  (GCRF)
-        eps = Y - X   # (N, 6)
-
-        # Rotate ε to RIC frame: z_i = T_i @ ε_i  (eq. 444)
-        z_ric = np.einsum("nij,nj->ni", rtn_matrices, eps)   # (N, 6)
-
-        # Whiten: divide by RIC std-devs  (eq. whitened_residual)
-        z = z_ric / sigma6[np.newaxis, :]   # (N, 6), dimensionless
-
-        return z.ravel()
-
-    return residuals
+    return _ResidualFunction(
+        t0=t0,
+        Y=Y,
+        dates=dates,
+        model_cfg=model_cfg,
+        sigma6=sigma6,
+        pscale=pscale,
+        rtn_matrices=rtn_matrices,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -510,9 +545,35 @@ def fit_object(
     if ls_cfg.get("diff_step") is not None:
         ls_kwargs["diff_step"] = ls_cfg["diff_step"]
 
+    workers = ls_cfg.get("workers", 1)
+    workers = 1 if workers is None else int(workers)
+    if workers < 1:
+        raise ValueError("least_squares.workers must be at least 1")
+
     if verbose:
         print("Running Levenberg-Marquardt fit ...")
-    result = scipy.optimize.least_squares(residuals_fn, p0, **ls_kwargs)
+
+    if workers == 1:
+        result = scipy.optimize.least_squares(residuals_fn, p0, **ls_kwargs)
+    else:
+        if mp.current_process().daemon:
+            raise RuntimeError(
+                "Parallel Jacobian workers cannot be started from a daemonic "
+                "process; use either catalog-level or fit-level parallelism"
+            )
+        if verbose:
+            print(f"  Jacobian workers: {workers} processes")
+        context = mp.get_context("spawn")
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=context,
+        ) as executor:
+            result = scipy.optimize.least_squares(
+                residuals_fn,
+                p0,
+                workers=executor.map,
+                **ls_kwargs,
+            )
 
     # ---- 6. Extract fitted state and β ---------------------------------------
     p_fit     = result.x * pscale

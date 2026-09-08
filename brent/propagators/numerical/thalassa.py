@@ -110,7 +110,11 @@ class ThalassaProcess(mp.Process):
             raise RuntimeError(f"Propagation timed out after {timeout} seconds")
         finally:
             # Terminate process
-            self.kill()
+            if self.is_alive():
+                self.kill()
+            # Reap the child so repeated/parallel propagations do not leave zombies.
+            self.join()
+            self.results.close()
 
         # Return propagated states
         return states
