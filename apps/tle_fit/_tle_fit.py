@@ -23,7 +23,7 @@ from brent.constants import Constants
 from brent.frames import RTN, Keplerian
 from brent.io import Saver
 from brent.propagators import NumericalPropagatorParameters, ThalassaNumericalPropagator
-from brent.util import get_commit
+from brent.util import get_commit, has_uncommitted_changes
 
 
 # ---------------------------------------------------------------------------
@@ -344,22 +344,69 @@ def find_ref_index(dates: list, ref_epoch) -> int:
 
 
 def save_text_report(result: dict, path: str) -> None:
-    """Save all single-object fit results in a readable text format."""
+    """Save the concise, human-readable single-object fit report."""
+    def utc(value) -> str:
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("UTC")
+        else:
+            timestamp = timestamp.tz_convert("UTC")
+        return timestamp.isoformat(sep=" ")
+
+    def state_km(state) -> np.ndarray:
+        return np.asarray(state) / 1000.0
+
+    def write_section(fid, title: str, lines: list[str]) -> None:
+        fid.write(f"[{title}]\n")
+        fid.write("\n".join(lines))
+        fid.write("\n\n")
+
+    cov_ric_diag = np.diag(result["covariance_ric"]).copy()
+    cov_ric_diag[:6] /= 1000.0**2  # m² and (m/s)² -> km² and (km/s)²
     with open(path, "w") as fid:
-        for key, value in result.items():
-            fid.write(f"{key}:\n")
-            if isinstance(value, np.ndarray):
-                fid.write(np.array2string(
-                    value,
-                    precision=12,
-                    max_line_width=120,
-                    threshold=value.size,
-                ))
-            elif key == "dates":
-                fid.write("\n".join(str(date) for date in value))
-            else:
-                fid.write(str(value))
-            fid.write("\n\n")
+        fid.write("TLE FIT REPORT\n")
+        fid.write("Units: state and RMS values are km and km/s; beta is m^2/kg.\n")
+        fid.write("The covariance reported in the RIC frame is diagonal.\n\n")
+
+        write_section(fid, "Input", [
+            f"input_tle_path: {result['input_tle_path']}",
+            f"window_start_utc: {utc(result['window_start'])}",
+            f"window_end_utc: {utc(result['window_end'])}",
+            f"ref_tle_index: {result['ref_tle_index']}",
+            f"ref_epoch_utc: {utc(result['ref_epoch'])}",
+            f"beta_guess_m2kg: {result['beta_guess']}",
+        ])
+
+        write_section(fid, "Git", [
+            f"commit: {result['git_commit']}",
+            f"uncommitted_changes: {result['git_uncommitted_changes']}",
+        ])
+
+        write_section(fid, "State at fit epoch (GCRF)", [
+            "state_tle_gcrf: [Rx, Ry, Rz, Vx, Vy, Vz]",
+            np.array2string(state_km(result["state_tle_gcrf"]), precision=12,
+                            max_line_width=120),
+            "state_gcrf_fit: [Rx, Ry, Rz, Vx, Vy, Vz]",
+            np.array2string(state_km(result["state_gcrf_fit"]), precision=12,
+                            max_line_width=120),
+            f"beta_fit_m2kg: {result['beta_fit']}",
+        ])
+
+        write_section(fid, "Covariance (RIC diagonal)", [
+            "[R, I, C, vR, vI, vC, beta]",
+            np.array2string(cov_ric_diag, precision=12, max_line_width=120),
+        ])
+
+        eps_rms = result["eps_rms_ric"] / 1000.0
+        write_section(fid, "Residuals", [
+            f"dimensionless_rms: {result['wrms']:.12g}",
+            f"RIC_pos_RMS_km: R={eps_rms[0]:.12g} I={eps_rms[1]:.12g} C={eps_rms[2]:.12g}",
+            f"RIC_vel_RMS_km_s: R={eps_rms[3]:.12g} I={eps_rms[4]:.12g} C={eps_rms[5]:.12g}",
+        ])
+
+        write_section(fid, "Solver (scipy.optimize.least_squares, LM)", [
+            f"status: {result['solver_message']}",
+        ])
 
 
 # ---------------------------------------------------------------------------
@@ -518,9 +565,6 @@ def fit_object(
     p_fit     = result.x * pscale
     state_fit = p_fit[0:6]
     beta_fit  = p_fit[6]
-    cr_fit    = (beta_fit
-                 * model_cfg.get("mass",     1.0)
-                 / model_cfg.get("area_srp", 1.0))
 
     # ---- 7. Covariance from the Jacobian (whitened → physical) ---------------
     J = result.jac
@@ -550,10 +594,10 @@ def fit_object(
     if verbose:
         print(f"  Solver status : {result.message}")
         print(f"  Iterations    : {result.nfev} function evaluations")
-        print(f"  Weighted RMS  : {wrms:.4f}  (should be ~1 for well-calibrated noise)")
+        print(f"  Dimensionless RMS : {wrms:.4f}  (should be ~1 for well-calibrated noise)")
         print(f"  RIC pos RMS   : R={eps_rms[0]:.2f} I={eps_rms[1]:.2f} C={eps_rms[2]:.2f} m")
         print(f"  RIC vel RMS   : R={eps_rms[3]:.4f} I={eps_rms[4]:.4f} C={eps_rms[5]:.4f} m/s")
-        print(f"  β_fit = {beta_fit:.6f} m²/kg,  cr_fit = {cr_fit:.6f}")
+        print(f"  β_fit = {beta_fit:.6f} m²/kg")
         print(f"  Wallclock     : {wallclock_s:.1f} s")
 
     # ---- 9. Assemble result dict ---------------------------------------------
@@ -564,21 +608,20 @@ def fit_object(
         "window_start":     start,
         "window_end":       end,
         "n_measurements":   N,
-        "ref_index":        ref_index,
+        "ref_tle_index":    ref_index,
         "ref_epoch":        t0,
-        "initial_guess_tle_index": ref_index,
-        "initial_guess_tle_epoch": dates[ref_index],
         "beta_guess":       beta0,
         "sigma_ric":        sigma6,
         "model_cfg":        str(model_cfg),
         "ls_cfg":           str(ls_cfg),
         "git_commit":       get_commit(),
+        "git_uncommitted_changes": has_uncommitted_changes(),
 
         # Fitted state (GCRF at ref_epoch)
-        # state_gcrf : [Rx, Ry, Rz, Vx, Vy, Vz] in [m, m/s]
-        "state_gcrf":       state_fit,
+        # States: [Rx, Ry, Rz, Vx, Vy, Vz] in [m, m/s]
+        "state_gcrf_fit":   state_fit,
+        "state_tle_gcrf":   state0_guess,
         "beta_fit":         beta_fit,
-        "cr_fit":           cr_fit,
 
         # Covariances
         # covariance_gcrf : 7×7 cov of [Rx,Ry,Rz,Vx,Vy,Vz,β] in [m²,(m/s)²,(m²/kg)²]
@@ -607,17 +650,6 @@ def fit_object(
         # Timing
         "wallclock_s":      wallclock_s,
 
-        # Format description
-        "format": (
-            "state_gcrf: [Rx,Ry,Rz,Vx,Vy,Vz] in m and m/s, GCRF frame, at ref_epoch. "
-            "initial_guess_tle_index/epoch: source TLE propagated with SGP4 to ref_epoch. "
-            "beta_fit: C_R*A_srp/mass in m^2/kg. "
-            "covariance_gcrf: 7x7 cov of [Rx,Ry,Rz,Vx,Vy,Vz,beta] in [m^2,(m/s)^2,(m^2/kg)^2]. "
-            "covariance_ric:  same but rotated to RIC frame at ref_epoch. "
-            "z_final: (N,6) dimensionless whitened residuals. "
-            "eps_rms_ric: (6,) per-component RMS [m,m/s] in RIC order [R,I,C,vR,vI,vC]. "
-            "wallclock_s: total fit time in seconds."
-        ),
     }
 
 
