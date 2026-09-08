@@ -22,6 +22,7 @@ def main(input_dir, output=None):
     _, dates, Y = load_measurements(
         fit["input_tle_path"], fit["window_start"], fit["window_end"]
     )
+    dates = pd.DatetimeIndex(dates)
 
     # model_cfg is saved as a Python dictionary string. Restore its tolerance
     # and physical parameters, with cr = beta_fit * mass / area_srp.
