@@ -39,6 +39,8 @@ def main(input_dir, output=None):
         "delta_r_R_m", "delta_r_I_m", "delta_r_C_m",
         "delta_v_R_m_s", "delta_v_I_m_s", "delta_v_C_m_s",
     ])
+    table["delta_r_norm_m"] = np.linalg.norm(residuals[:, :3], axis=1)
+    table["delta_v_norm_m_s"] = np.linalg.norm(residuals[:, 3:], axis=1)
     table.insert(0, "MJD_UTC", dates_to_MJD(dates))
     table.insert(0, "EPOCH_UTC", dates.strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
     output = Path(output) if output else fit_path.with_name(f"{fit_path.stem}_residuals.csv")
