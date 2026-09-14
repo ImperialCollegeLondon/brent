@@ -19,6 +19,7 @@ class Saver:
         root: str,
         save_period: int = 50,
         retry_limit: int = 5,
+        name_suffix: str = "",
     ) -> None:
         # Declare state
         self.state = SaverState.DEINITIALISED
@@ -28,7 +29,7 @@ class Saver:
         while self.state != SaverState.INITIALISED:
             # Save start time and name
             self.time = datetime.now(timezone.utc)
-            self.name = self.time.strftime("%Y%m%d_%H%M%S")
+            self.name = self.time.strftime("%Y%m%d_%H%M%S") + name_suffix
 
             # Create directory
             initialised = self._create_directory(root, self.name)

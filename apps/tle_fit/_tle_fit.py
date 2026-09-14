@@ -662,7 +662,9 @@ def main(input_path: str, output_dir: str) -> None:
 
     cfg = load_config(input_path)
 
-    saver = Saver(output_dir)
+    # Keep the NORAD ID in the timestamped output directory and filenames.
+    norad_id, _ = _load_csv(cfg["tle"])
+    saver = Saver(output_dir, name_suffix=f"_{norad_id}")
     ref_epoch = cfg.get("reference", {}).get("_epoch")
     result = fit_object(cfg["tle"], cfg, ref_epoch=ref_epoch, verbose=True)
 
