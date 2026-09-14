@@ -17,10 +17,11 @@ from org.orekit.propagation.analytical.tle import (
     TLE,
     TLEPropagator as OrekitTLEPropagator,
 )
+from org.hipparchus.geometry.euclidean.threed import Vector3D
 
 # Internal imports
 from brent.constants import Constants
-from brent.frames import RTN, Keplerian
+from brent.frames import AngleType, RTN, Keplerian
 from brent.io import Saver
 from brent.propagators import NumericalPropagatorParameters, ThalassaNumericalPropagator
 from brent.util import get_commit, has_uncommitted_changes
@@ -343,6 +344,30 @@ def find_ref_index(dates: list, ref_epoch) -> int:
     return int(np.argmin(diffs))
 
 
+def state_to_oels(date, state: np.ndarray) -> np.ndarray:
+    """Return GCRF osculating elements plus ITRF geocentric longitude.
+
+    The returned state is ``[SMA, ECC, INC, RAAN, AOP, TA, LAM]`` in
+    ``[m, -, rad, rad, rad, rad, rad]``.  The first six quantities are
+    osculating Keplerian elements in GCRF; LAM is the geocentric longitude of
+    the GCRF position after transforming it to ITRF at ``date``.
+    """
+    state = np.asarray(state)
+    oels = Keplerian.from_cartesian(
+        [date], state.reshape(1, 6), angle=AngleType.TRUE
+    )[0]
+
+    date_abs = datetime_to_absolutedate(date)
+    gcrf_to_itrf = Constants.DEFAULT_ECI.getTransformTo(
+        Constants.DEFAULT_ECEF, date_abs
+    )
+    position_itrf = gcrf_to_itrf.toStaticTransform().transformPosition(
+        Vector3D(*state[:3].tolist())
+    )
+    longitude = np.arctan2(position_itrf.getY(), position_itrf.getX()) % (2.0 * np.pi)
+    return np.append(oels, longitude)
+
+
 def save_text_report(result: dict, path: str) -> None:
     """Save the concise, human-readable single-object fit report."""
     def utc(value) -> str:
@@ -356,6 +381,13 @@ def save_text_report(result: dict, path: str) -> None:
     def state_km(state) -> np.ndarray:
         return np.asarray(state) / 1000.0
 
+    def oels_report(oels) -> np.ndarray:
+        """Convert [m, -, rad, ..., rad] to [km, -, deg, ..., deg]."""
+        values = np.asarray(oels).copy()
+        values[0] /= 1000.0
+        values[2:] = np.rad2deg(values[2:])
+        return values
+
     def write_section(fid, title: str, lines: list[str]) -> None:
         fid.write(f"[{title}]\n")
         fid.write("\n".join(lines))
@@ -366,6 +398,10 @@ def save_text_report(result: dict, path: str) -> None:
     with open(path, "w") as fid:
         fid.write("TLE FIT REPORT\n")
         fid.write("Units: state and RMS values are km and km/s; beta is m^2/kg.\n")
+        fid.write(
+            "Osculating elements use km, dimensionless eccentricity, and degrees; "
+            "LAM is east-positive ITRF geocentric longitude.\n"
+        )
         fid.write("The covariance reported in the RIC frame is diagonal.\n\n")
 
         write_section(fid, "Input", [
@@ -382,12 +418,18 @@ def save_text_report(result: dict, path: str) -> None:
             f"uncommitted_changes: {result['git_uncommitted_changes']}",
         ])
 
-        write_section(fid, "State at fit epoch (GCRF)", [
+        write_section(fid, "State at fit epoch (GCRF; LAM in ITRF)", [
             "state_tle_gcrf: [Rx, Ry, Rz, Vx, Vy, Vz]",
             np.array2string(state_km(result["state_tle_gcrf"]), precision=12,
                             max_line_width=120),
             "state_gcrf_fit: [Rx, Ry, Rz, Vx, Vy, Vz]",
             np.array2string(state_km(result["state_gcrf_fit"]), precision=12,
+                            max_line_width=120),
+            "state_tle_oels: [SMA, ECC, INC, RAAN, AOP, TA, LAM]",
+            np.array2string(oels_report(result["state_tle_oels"]), precision=12,
+                            max_line_width=120),
+            "state_fit_oels: [SMA, ECC, INC, RAAN, AOP, TA, LAM]",
+            np.array2string(oels_report(result["state_fit_oels"]), precision=12,
                             max_line_width=120),
             f"beta_fit_m2kg: {result['beta_fit']}",
         ])
@@ -565,6 +607,8 @@ def fit_object(
     p_fit     = result.x * pscale
     state_fit = p_fit[0:6]
     beta_fit  = p_fit[6]
+    state_tle_oels = state_to_oels(t0, state0_guess)
+    state_fit_oels = state_to_oels(t0, state_fit)
 
     # ---- 7. Covariance from the Jacobian (whitened → physical) ---------------
     J = result.jac
@@ -621,6 +665,11 @@ def fit_object(
         # States: [Rx, Ry, Rz, Vx, Vy, Vz] in [m, m/s]
         "state_gcrf_fit":   state_fit,
         "state_tle_gcrf":   state0_guess,
+        # [SMA, ECC, INC, RAAN, AOP, TA, LAM] in [m, -, rad, rad, rad, rad, rad].
+        # The first six entries are GCRF osculating elements; LAM is ITRF
+        # geocentric longitude at the same epoch, positive eastward.
+        "state_tle_oels":   state_tle_oels,
+        "state_fit_oels":   state_fit_oels,
         "beta_fit":         beta_fit,
 
         # Covariances
