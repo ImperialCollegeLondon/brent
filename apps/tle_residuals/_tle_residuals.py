@@ -3,10 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from orekit.pyhelpers import datetime_to_absolutedate
-from org.orekit.propagation.analytical.tle import (
-    TLEPropagator as OrekitTLEPropagator,
-)
+from brent.propagators import ValladoSGP4Propagator
 
 from apps.tle_fit._tle_fit import (
     _make_thalassa_model,
@@ -21,13 +18,7 @@ from brent.propagators.numerical.thalassa import dates_to_MJD
 def _propagate_tle(propagator, date):
     """Return one SGP4 state in GCRF at ``date`` [m, m/s]."""
     date = pd.Timestamp(date).to_pydatetime()
-    pv = propagator.getPVCoordinates(
-        datetime_to_absolutedate(date), Constants.DEFAULT_ECI
-    )
-    return np.concatenate([
-        np.array(pv.getPosition().toArray()),
-        np.array(pv.getVelocity().toArray()),
-    ])
+    return propagator._propagate(date, Constants.DEFAULT_ECI)
 
 
 def giorgini_tle_states(tle_dates, tles, evaluation_dates):
@@ -40,7 +31,7 @@ def giorgini_tle_states(tle_dates, tles, evaluation_dates):
     tle_dates = pd.DatetimeIndex(tle_dates)
     evaluation_dates = pd.DatetimeIndex(evaluation_dates)
     propagators = [
-        OrekitTLEPropagator.selectExtrapolator(tle) for tle in tles
+        ValladoSGP4Propagator(tle) for tle in tles
     ]
 
     states = np.empty((len(evaluation_dates), 6))

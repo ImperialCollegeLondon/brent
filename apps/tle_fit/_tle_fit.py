@@ -15,7 +15,6 @@ import orekit
 from orekit.pyhelpers import datetime_to_absolutedate
 from org.orekit.propagation.analytical.tle import (
     TLE,
-    TLEPropagator as OrekitTLEPropagator,
 )
 from org.hipparchus.geometry.euclidean.threed import Vector3D
 
@@ -23,7 +22,11 @@ from org.hipparchus.geometry.euclidean.threed import Vector3D
 from brent.constants import Constants
 from brent.frames import AngleType, RTN, Keplerian
 from brent.io import Saver
-from brent.propagators import NumericalPropagatorParameters, ThalassaNumericalPropagator
+from brent.propagators import (
+    NumericalPropagatorParameters,
+    ThalassaNumericalPropagator,
+    ValladoSGP4Propagator,
+)
 from brent.util import get_commit, has_uncommitted_changes
 
 
@@ -116,8 +119,8 @@ def _build_tle(epoch_dt: datetime,
 def _tle_to_gcrf(tle: TLE, epoch_dt=None) -> tuple[datetime, np.ndarray]:
     """Evaluate SGP4 at ``epoch_dt`` and rotate TEME → GCRF.
 
-    Orekit's OrekitTLEPropagator handles the TEME→GCRF rotation internally when
-    we request PV coordinates in the GCRF frame via Constants.DEFAULT_ECI.
+    Vallado supplies TEME states; the adapter uses Orekit's TEME→GCRF frame
+    transform for the position and velocity.
 
     If ``epoch_dt`` is omitted, the TLE's own epoch is used.
 
@@ -125,14 +128,13 @@ def _tle_to_gcrf(tle: TLE, epoch_dt=None) -> tuple[datetime, np.ndarray]:
     """
     from orekit.pyhelpers import absolutedate_to_datetime
 
-    propagator = OrekitTLEPropagator.selectExtrapolator(tle)
-    epoch_abs = (tle.getDate() if epoch_dt is None
-                 else datetime_to_absolutedate(epoch_dt))
-    pv = propagator.getPVCoordinates(epoch_abs, Constants.DEFAULT_ECI)
-    pos = np.array(pv.getPosition().toArray())   # m
-    vel = np.array(pv.getVelocity().toArray())   # m/s
+    epoch_abs = (
+        tle.getDate() if epoch_dt is None else datetime_to_absolutedate(epoch_dt)
+    )
+    propagator = ValladoSGP4Propagator(tle)
+    state = propagator._propagate_absolute(epoch_abs, Constants.DEFAULT_ECI)
     epoch_dt = absolutedate_to_datetime(epoch_abs)
-    return epoch_dt, np.concatenate([pos, vel])
+    return epoch_dt, state
 
 
 def load_measurements(tle_path: str,

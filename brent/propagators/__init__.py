@@ -6,3 +6,4 @@ from .numerical import (
     ThalassaNumericalPropagator,
 )
 from .analytical import SP3Propagator, TLEPropagator, TLEPropagatorMethod
+from .vallado_sgp4 import ValladoSGP4Propagator

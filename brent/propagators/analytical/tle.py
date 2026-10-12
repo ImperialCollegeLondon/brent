@@ -14,14 +14,12 @@ import pandas as pd
 # Orekit imports
 import orekit
 from orekit.pyhelpers import datetime_to_absolutedate, absolutedate_to_datetime
-from org.orekit.propagation.analytical.tle import (
-    TLE,
-    TLEPropagator as OrekitTLEPropagator,
-)
+from org.orekit.propagation.analytical.tle import TLE
 
 # Internal imports
 from brent import Constants
-from brent.propagators import Propagator, WrappedPropagator
+from brent.propagators import Propagator
+from brent.propagators.vallado_sgp4 import ValladoSGP4Propagator
 
 
 class TLEPropagatorMethod(Enum):
@@ -47,10 +45,7 @@ class TLEPropagator(Propagator):
 
         # Generate epochs and propagators
         epochs = [absolutedate_to_datetime(itle.getDate()) for itle in tles]
-        propagators = [
-            WrappedPropagator(OrekitTLEPropagator.selectExtrapolator(itle))
-            for itle in tles
-        ]
+        propagators = [ValladoSGP4Propagator(itle) for itle in tles]
 
         # Sort propagators
         indices = sorted(range(len(epochs)), key=lambda k: epochs[k])
