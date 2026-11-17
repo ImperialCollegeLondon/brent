@@ -1,3 +1,5 @@
+# MacOS folder files
+.DS_Store
 # Results
 *.pkl
 *.bak

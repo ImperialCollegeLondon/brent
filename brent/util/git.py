@@ -15,3 +15,16 @@ def get_commit() -> str:
         .decode("ascii")
         .strip()
     )
+
+
+def has_uncommitted_changes() -> bool:
+    """Return whether the repository differs from its current HEAD commit."""
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=brent.paths.ROOT_DIR,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return bool(status.stdout.strip())

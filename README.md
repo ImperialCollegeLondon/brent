@@ -60,6 +60,29 @@ The main script used with BRENT is `main.py` which is the entry point for variou
 
 TLEs and ILRS/DORIS/IGS orbit product data are expected in JSON and SP3 formats respectively.
 
+#### Residuals from a saved TLE fit
+
+Run from the `brent` directory with the `brent` conda environment active:
+
+```
+python main.py tle_residuals -i output/20260908_123207
+```
+
+The app reads the final single-object `tle_fit` pickle and the original TLE
+history CSV at the path stored in that result. It propagates the fitted GCRF
+state forward and backward from the fit epoch, using the fitted beta and saved
+physical model and tolerance, to every TLE epoch within the saved fit window
+(inclusive). The original relative TLE path is resolved from the working directory.
+
+The output is `<run>_residuals.csv` in the fit directory; use `-o path/to/residuals.csv`
+to choose another file. Columns contain UTC epochs, MJD UTC, and the six RIC
+components of **THALASSA minus TLE**, with position in metres and velocity in m/s.
+Each TLE is evaluated at its own epoch using the same SGP4 and TEME-to-GCRF
+conversion as `tle_fit`. RIC axes come from that TLE's osculating state. Both
+position and velocity differences are rotated onto those axes; velocity columns
+are inertial velocity differences expressed in RIC, without a rotating-frame
+derivative term. This residual sign is opposite to the fit's stored `z_final`.
+
 ## Authors
 * Max Hallgarten La Casta (m.hallgarten-la-casta21@imperial.ac.uk)
 
